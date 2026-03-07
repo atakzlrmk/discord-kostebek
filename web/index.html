@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Discord Kostebek - Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="blob-wrapper">
+        <div class="blob"></div>
+        <div class="blob blob-2"></div>
+    </div>
+
+    <div class="container">
+        <!-- Dashboard Header -->
+        <header class="header">
+            <div class="logo-wrapper">
+                <div class="logo-icon">👾</div>
+                <div class="logo-text">
+                    <h1>Discord <span>Kostebek</span></h1>
+                    <p data-i18n="subtitle">DPI Bypass Kontrol Paneli</p>
+                </div>
+            </div>
+            <div class="settings-wrapper">
+                <button class="lang-btn" onclick="toggleLanguage()" id="lang-btn">🇺🇸 EN</button>
+            </div>
+        </header>
+
+        <!-- Status Card -->
+        <div class="card status-card">
+            <div class="card-body">
+                <div class="status-indicator">
+                    <div class="dot" id="status-dot"></div>
+                    <h2 id="status-text" data-i18n="status_checking">Durum Kontrol Ediliyor...</h2>
+                </div>
+                <p class="status-desc" id="status-desc" data-i18n="status_desc_checking">Lütfen bekleyin, servis kontrol
+                    ediliyor.</p>
+            </div>
+            <div class="loader-bar" id="status-loader"></div>
+        </div>
+
+        <!-- Action Grid - Grouped logically -->
+        <div class="action-grid" id="main-actions">
+            <!-- Start Background Action -->
+            <button class="action-btn primary" onclick="handleAction('start_bg')" id="btn-start">
+                <div class="btn-icon">⚡</div>
+                <div class="btn-content">
+                    <h3 data-i18n="btn_install">Kur ve Başlat</h3>
+                    <p data-i18n="btn_install_desc">Arkaplan Servisi Kurar (Önerilen)</p>
+                </div>
+            </button>
+
+            <!-- Pause Action -->
+            <button class="action-btn outline" onclick="handleAction('pause_bg')" id="btn-pause" style="display: none;">
+                <div class="btn-icon">⏸️</div>
+                <div class="btn-content">
+                    <h3 data-i18n="btn_pause">Geçici Olarak Durdur</h3>
+                    <p data-i18n="btn_pause_desc">Arka Planı Bekletir / Duraklatır</p>
+                </div>
+            </button>
+
+            <!-- Resume Action -->
+            <button class="action-btn primary" onclick="handleAction('resume_bg')" id="btn-resume"
+                style="display: none;">
+                <div class="btn-icon">▶️</div>
+                <div class="btn-content">
+                    <h3 data-i18n="btn_resume">Servisi Sürdür</h3>
+                    <p data-i18n="btn_resume_desc">Arka Planı Yeniden Başlatır</p>
+                </div>
+            </button>
+
+            <!-- Repair Action -->
+            <button class="action-btn outline" onclick="handleAction('repair_bg')" id="btn-repair"
+                style="display: none;">
+                <div class="btn-icon">🛠️</div>
+                <div class="btn-content">
+                    <h3 data-i18n="btn_repair">Servisi Onar</h3>
+                    <p data-i18n="btn_repair_desc">Bozulduysa Yeniden Üzerine Kur</p>
+                </div>
+            </button>
+
+            <!-- Stop Background Action -->
+            <button class="action-btn danger" onclick="handleAction('uninstall_bg')" id="btn-uninstall"
+                style="display: none;">
+                <div class="btn-icon">🗑️</div>
+                <div class="btn-content">
+                    <h3 data-i18n="btn_uninstall">Kaldır ve Yok Et</h3>
+                    <p data-i18n="btn_uninstall_desc">Sistemden Tamamen Siler</p>
+                </div>
+            </button>
+
+            <!-- Temporary Action -->
+            <button class="action-btn outline" onclick="handleAction('start_temp')" id="btn-temp">
+                <div class="btn-icon">🔄</div>
+                <div class="btn-content">
+                    <h3 data-i18n="btn_temp">Terminalde Başlat (Geçici)</h3>
+                    <p data-i18n="btn_temp_desc">Sadece Açık Kaldığı Sürece Çalışır</p>
+                </div>
+            </button>
+
+            <!-- Exit Action -->
+            <button class="action-btn minimal" onclick="handleExit()" id="btn-exit">
+                <div class="btn-icon">🚪</div>
+                <div class="btn-content">
+                    <h3 data-i18n="btn_exit">Arayüzü Kapat</h3>
+                </div>
+            </button>
+        </div>
+
+        <div class="footer" data-i18n="footer">
+            Discord Türkiye engellemesini aşmak için geliştirilmiştir.
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div class="toast-container" id="toast">
+        <div class="toast-icon">✨</div>
+        <div class="toast-message" id="toast-msg">İşlem başarılı!</div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
