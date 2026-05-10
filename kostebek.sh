@@ -15,8 +15,44 @@ SPOOFDPI_ARGS=(
     --no-tui
 )
 
+if [ -t 1 ] && command -v tput >/dev/null 2>&1 && [ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]; then
+    BOLD="$(tput bold)"
+    DIM="$(tput dim)"
+    RESET="$(tput sgr0)"
+    RED="$(tput setaf 1)"
+    GREEN="$(tput setaf 2)"
+    YELLOW="$(tput setaf 3)"
+    BLUE="$(tput setaf 4)"
+    CYAN="$(tput setaf 6)"
+else
+    BOLD=""
+    DIM=""
+    RESET=""
+    RED=""
+    GREEN=""
+    YELLOW=""
+    BLUE=""
+    CYAN=""
+fi
+
 say() {
     printf '%s\n' "$*"
+}
+
+info() {
+    say "${BLUE}==>${RESET} $*"
+}
+
+ok() {
+    say "${GREEN}OK${RESET}  $*"
+}
+
+warn() {
+    say "${YELLOW}!!${RESET}  $*"
+}
+
+fail() {
+    say "${RED}!!${RESET}  $*"
 }
 
 require_root() {
@@ -33,13 +69,13 @@ need_cmd() {
     }
 }
 
-run_quiet() {
+run_step() {
     local seconds="$1"
     local label="$2"
     shift 2
 
-    say "$label..."
-    "$@" >/dev/null 2>&1 &
+    info "$label"
+    "$@" &
     local pid=$!
     local elapsed=0
 
@@ -47,7 +83,7 @@ run_quiet() {
         if [ "$elapsed" -ge "$seconds" ]; then
             kill "$pid" 2>/dev/null || true
             wait "$pid" 2>/dev/null || true
-            say "$label timed out; continuing."
+            warn "$label timed out after ${seconds}s"
             return 1
         fi
 
@@ -55,47 +91,74 @@ run_quiet() {
         elapsed=$((elapsed + 1))
     done
 
-    if wait "$pid" 2>/dev/null; then
+    if wait "$pid"; then
+        ok "$label"
         return 0
     fi
 
-    say "$label skipped or already clean."
+    warn "$label failed or was already clean"
     return 1
 }
 
-status() {
+status_key() {
     case "$(uname -s)" in
         Darwin)
             if launchctl print "system/$LABEL" >/dev/null 2>&1; then
-                say "Status: background service running"
+                say "running"
                 return 0
             fi
             if pgrep -f spoofdpi >/dev/null 2>&1 || ps ax 2>/dev/null | grep -v grep | grep -q spoofdpi; then
-                say "Status: temporary mode running"
+                say "temporary"
                 return 0
             fi
             if [ -f "$PLIST" ]; then
-                say "Status: background service installed but paused"
+                say "paused"
                 return 0
             fi
             ;;
         Linux)
             if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
-                say "Status: background service running"
+                say "running"
                 return 0
             fi
             if pgrep -f spoofdpi >/dev/null 2>&1 || ps ax 2>/dev/null | grep -v grep | grep -q spoofdpi; then
-                say "Status: temporary mode running"
+                say "temporary"
                 return 0
             fi
             if [ -f "/etc/systemd/system/$SERVICE" ]; then
-                say "Status: background service installed but stopped"
+                say "paused"
                 return 0
             fi
             ;;
     esac
 
-    say "Status: stopped"
+    say "stopped"
+}
+
+status_label() {
+    case "$1" in
+        running) say "Background service running" ;;
+        temporary) say "Temporary mode running" ;;
+        paused) say "Installed but paused" ;;
+        *) say "Stopped" ;;
+    esac
+}
+
+status_color() {
+    case "$1" in
+        running) printf '%s' "$GREEN" ;;
+        temporary) printf '%s' "$CYAN" ;;
+        paused) printf '%s' "$YELLOW" ;;
+        *) printf '%s' "$RED" ;;
+    esac
+}
+
+status() {
+    local state label color
+    state="$(status_key)"
+    label="$(status_label "$state")"
+    color="$(status_color "$state")"
+    say "${BOLD}Status:${RESET} ${color}${label}${RESET}"
 }
 
 network_service() {
@@ -113,9 +176,9 @@ network_service() {
 }
 
 stop_spoofdpi_processes() {
-    run_quiet 3 "Stopping SpoofDPI processes" pkill -x spoofdpi || true
-    run_quiet 3 "Stopping SpoofDPI by path" pkill -f "/spoofdpi" || true
-    run_quiet 3 "Stopping SpoofDPI by name" killall spoofdpi || true
+    run_step 3 "Stopping SpoofDPI processes" pkill -x spoofdpi || true
+    run_step 3 "Stopping SpoofDPI by path" pkill -f "/spoofdpi" || true
+    run_step 3 "Stopping SpoofDPI by name" killall spoofdpi || true
 }
 
 proxy_on() {
@@ -123,10 +186,10 @@ proxy_on() {
     local svc
     svc="$(network_service)"
     [ -n "$svc" ] || return 0
-    networksetup -setwebproxy "$svc" 127.0.0.1 8080
-    networksetup -setsecurewebproxy "$svc" 127.0.0.1 8080
-    networksetup -setwebproxystate "$svc" on
-    networksetup -setsecurewebproxystate "$svc" on
+    run_step 5 "Setting HTTP proxy on $svc" networksetup -setwebproxy "$svc" 127.0.0.1 8080
+    run_step 5 "Setting HTTPS proxy on $svc" networksetup -setsecurewebproxy "$svc" 127.0.0.1 8080
+    run_step 5 "Enabling HTTP proxy on $svc" networksetup -setwebproxystate "$svc" on
+    run_step 5 "Enabling HTTPS proxy on $svc" networksetup -setsecurewebproxystate "$svc" on
 }
 
 proxy_off() {
@@ -134,17 +197,22 @@ proxy_off() {
     local svc
     svc="$(network_service)"
     [ -n "$svc" ] || return 0
-    run_quiet 5 "Disabling HTTP proxy on $svc" networksetup -setwebproxystate "$svc" off || true
-    run_quiet 5 "Disabling HTTPS proxy on $svc" networksetup -setsecurewebproxystate "$svc" off || true
+    run_step 5 "Disabling HTTP proxy on $svc" networksetup -setwebproxystate "$svc" off || true
+    run_step 5 "Disabling HTTPS proxy on $svc" networksetup -setsecurewebproxystate "$svc" off || true
 }
 
 wait_for_port() {
     local attempts=20
+    info "Waiting for SpoofDPI on 127.0.0.1:8080"
     while [ "$attempts" -gt 0 ]; do
-        nc -z 127.0.0.1 8080 >/dev/null 2>&1 && return 0
+        if nc -z 127.0.0.1 8080 >/dev/null 2>&1; then
+            ok "SpoofDPI is listening on 127.0.0.1:8080"
+            return 0
+        fi
         sleep 0.5
         attempts=$((attempts - 1))
     done
+    warn "SpoofDPI did not open 127.0.0.1:8080 in time"
     return 1
 }
 
@@ -175,9 +243,10 @@ install_spoofdpi() {
 
     tmp="$(mktemp -d)"
     trap 'rm -rf "${tmp:-}"; trap - RETURN' RETURN
+    say "Using temporary directory: $tmp"
 
     say "Resolving latest SpoofDPI release..."
-    release_json="$(curl -fsSL https://api.github.com/repos/xvzc/SpoofDPI/releases/latest)"
+    release_json="$(curl -fsSL --connect-timeout 10 --max-time 60 https://api.github.com/repos/xvzc/SpoofDPI/releases/latest)"
     download_url="$(
         printf '%s\n' "$release_json" \
             | grep '"browser_download_url"' \
@@ -195,26 +264,30 @@ install_spoofdpi() {
 
     archive="$tmp/spoofdpi.tar.gz"
     say "Downloading $(basename "$download_url")..."
-    curl -fL "$download_url" -o "$archive"
+    curl -fL --connect-timeout 10 --max-time 180 "$download_url" -o "$archive"
+    say "Extracting SpoofDPI archive..."
     tar -xzf "$archive" -C "$tmp"
 
+    say "Locating SpoofDPI binary..."
     extracted="$(find "$tmp" -type f -name spoofdpi -print | head -n 1)"
     if [ -z "$extracted" ]; then
         say "Downloaded archive did not contain a spoofdpi binary."
         exit 1
     fi
 
-    mkdir -p "$install_dir"
-    install -m 0755 "$extracted" "$install_bin"
+    run_step 5 "Creating install directory $install_dir" mkdir -p "$install_dir"
+    run_step 5 "Installing SpoofDPI to $install_bin" install -m 0755 "$extracted" "$install_bin"
     say "SpoofDPI installed to $install_bin"
 }
 
 install_service() {
     require_root install
+    say "Starting background service install..."
     install_spoofdpi "/usr/local/bin"
 
     case "$(uname -s)" in
         Darwin)
+            say "Writing LaunchDaemon plist to $PLIST..."
             cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -238,15 +311,15 @@ install_service() {
 </dict>
 </plist>
 EOF
-            chown root:wheel "$PLIST"
-            chmod 644 "$PLIST"
-            launchctl bootout "system/$LABEL" 2>/dev/null || true
-            launchctl bootstrap system "$PLIST"
-            launchctl enable "system/$LABEL" 2>/dev/null || true
-            launchctl kickstart -k "system/$LABEL" 2>/dev/null || true
+            run_step 5 "Setting plist owner" chown root:wheel "$PLIST"
+            run_step 5 "Setting plist permissions" chmod 644 "$PLIST"
+            run_step 5 "Booting out existing $LABEL" launchctl bootout "system/$LABEL" || true
+            run_step 10 "Bootstrapping LaunchDaemon" launchctl bootstrap system "$PLIST" || true
+            run_step 5 "Enabling LaunchDaemon" launchctl enable "system/$LABEL" || true
+            run_step 10 "Starting LaunchDaemon" launchctl kickstart -k "system/$LABEL" || true
             wait_for_port || {
-                launchctl bootout "system/$LABEL" 2>/dev/null || true
-                launchctl bootout system "$PLIST" 2>/dev/null || true
+                run_step 5 "Cleaning up failed launchd service" launchctl bootout "system/$LABEL" || true
+                run_step 5 "Cleaning up failed plist bootstrap" launchctl bootout system "$PLIST" || true
                 proxy_off
                 say "SpoofDPI did not start on 127.0.0.1:8080."
                 [ -f /var/log/discordbypass_err.log ] && tail -n 20 /var/log/discordbypass_err.log
@@ -255,6 +328,7 @@ EOF
             proxy_on
             ;;
         Linux)
+            say "Writing systemd unit to /etc/systemd/system/$SERVICE..."
             cat > "/etc/systemd/system/$SERVICE" <<EOF
 [Unit]
 Description=SpoofDPI Discord Bypass Service
@@ -269,9 +343,9 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
-            systemctl daemon-reload
-            systemctl enable "$SERVICE"
-            systemctl restart "$SERVICE"
+            run_step 10 "Reloading systemd" systemctl daemon-reload
+            run_step 10 "Enabling systemd service" systemctl enable "$SERVICE"
+            run_step 10 "Restarting systemd service" systemctl restart "$SERVICE"
             ;;
         *) say "Unsupported OS: $(uname -s)"; exit 1 ;;
     esac
@@ -283,11 +357,11 @@ pause_service() {
     require_root pause
     case "$(uname -s)" in
         Darwin)
-            run_quiet 5 "Booting out $LABEL" launchctl bootout "system/$LABEL" || true
-            run_quiet 5 "Booting out plist" launchctl bootout system "$PLIST" || true
-            run_quiet 5 "Disabling launchd service" launchctl disable "system/$LABEL" || true
+            run_step 5 "Booting out $LABEL" launchctl bootout "system/$LABEL" || true
+            run_step 5 "Booting out plist" launchctl bootout system "$PLIST" || true
+            run_step 5 "Disabling launchd service" launchctl disable "system/$LABEL" || true
             ;;
-        Linux) run_quiet 10 "Stopping systemd service" systemctl stop "$SERVICE" || true ;;
+        Linux) run_step 10 "Stopping systemd service" systemctl stop "$SERVICE" || true ;;
     esac
     stop_spoofdpi_processes
     proxy_off
@@ -302,14 +376,14 @@ resume_service() {
                 say "Service is not installed. Run: sudo $0 install"
                 exit 1
             fi
-            launchctl bootstrap system "$PLIST" 2>/dev/null || true
-            launchctl enable "system/$LABEL" 2>/dev/null || true
-            launchctl kickstart -k "system/$LABEL" 2>/dev/null || true
+            run_step 10 "Bootstrapping LaunchDaemon" launchctl bootstrap system "$PLIST" || true
+            run_step 5 "Enabling LaunchDaemon" launchctl enable "system/$LABEL" || true
+            run_step 10 "Starting LaunchDaemon" launchctl kickstart -k "system/$LABEL" || true
             wait_for_port || { proxy_off; say "SpoofDPI did not start."; exit 1; }
             proxy_on
             ;;
         Linux)
-            systemctl start "$SERVICE"
+            run_step 10 "Starting systemd service" systemctl start "$SERVICE"
             ;;
     esac
     say "Service resumed."
@@ -319,17 +393,17 @@ uninstall_service() {
     require_root uninstall
     case "$(uname -s)" in
         Darwin)
-            run_quiet 5 "Booting out $LABEL" launchctl bootout "system/$LABEL" || true
-            run_quiet 5 "Booting out plist" launchctl bootout system "$PLIST" || true
-            run_quiet 5 "Disabling launchd service" launchctl disable "system/$LABEL" || true
+            run_step 5 "Booting out $LABEL" launchctl bootout "system/$LABEL" || true
+            run_step 5 "Booting out plist" launchctl bootout system "$PLIST" || true
+            run_step 5 "Disabling launchd service" launchctl disable "system/$LABEL" || true
             say "Removing plist..."
             rm -f "$PLIST"
             ;;
         Linux)
-            run_quiet 10 "Disabling systemd service" systemctl disable --now "$SERVICE" || true
+            run_step 10 "Disabling systemd service" systemctl disable --now "$SERVICE" || true
             say "Removing systemd unit..."
             rm -f "/etc/systemd/system/$SERVICE"
-            run_quiet 10 "Reloading systemd" systemctl daemon-reload || true
+            run_step 10 "Reloading systemd" systemctl daemon-reload || true
             ;;
     esac
     stop_spoofdpi_processes
@@ -357,25 +431,58 @@ run_temp() {
     "$SPOOFDPI_SYSTEM" "${SPOOFDPI_ARGS[@]}"
 }
 
+print_rule() {
+    say "${DIM}------------------------------------------------------------${RESET}"
+}
+
+print_header() {
+    local state label color os
+    state="$(status_key)"
+    label="$(status_label "$state")"
+    color="$(status_color "$state")"
+    os="$(uname -s)"
+
+    [ -t 1 ] && clear
+    say "${BOLD}${CYAN}Discord Kostebek${RESET}"
+    say "${DIM}CLI control panel for SpoofDPI on 127.0.0.1:8080${RESET}"
+    print_rule
+    printf '%s\n' "Status   ${color}${label}${RESET}"
+    printf '%s\n' "Platform ${os}"
+    print_rule
+}
+
+menu_item() {
+    local number="$1"
+    local title="$2"
+    local detail="$3"
+
+    printf '  %s) %s%s%s\n' "$number" "$BOLD" "$title" "$RESET"
+    printf '      %s%s%s\n' "$DIM" "$detail" "$RESET"
+}
+
+pause_prompt() {
+    read -r -p "Press ENTER to continue..." _
+}
+
 menu() {
     while true; do
-        clear
-        say "Discord Kostebek"
-        say "1) Show status"
-        say "2) Run temporarily"
-        say "3) Install background service"
-        say "4) Pause background service"
-        say "5) Resume background service"
-        say "6) Uninstall"
-        say "7) Exit"
-        read -r -p "Choice (1-7): " choice
+        print_header
+        menu_item 1 "Show status" "Print the current SpoofDPI/service state."
+        menu_item 2 "Run temporarily" "Start SpoofDPI in this terminal; Ctrl+C stops it."
+        menu_item 3 "Install background service" "Install SpoofDPI and start it at boot."
+        menu_item 4 "Pause background service" "Stop launchd/systemd service and disable proxy."
+        menu_item 5 "Resume background service" "Start the installed service again."
+        menu_item 6 "Uninstall" "Remove service, proxy settings, and installed binary."
+        menu_item 7 "Exit" "Close this menu."
+        print_rule
+        read -r -p "Choice [1-7]: " choice
         case "$choice" in
-            1) "$0" status; read -r -p "Press ENTER..." _ ;;
-            2) sudo "$0" temp; read -r -p "Press ENTER..." _ ;;
-            3) sudo "$0" install; read -r -p "Press ENTER..." _ ;;
-            4) sudo "$0" pause; read -r -p "Press ENTER..." _ ;;
-            5) sudo "$0" resume; read -r -p "Press ENTER..." _ ;;
-            6) sudo "$0" uninstall; read -r -p "Press ENTER..." _ ;;
+            1) "$0" status; pause_prompt ;;
+            2) sudo "$0" temp; pause_prompt ;;
+            3) sudo "$0" install; pause_prompt ;;
+            4) sudo "$0" pause; pause_prompt ;;
+            5) sudo "$0" resume; pause_prompt ;;
+            6) sudo "$0" uninstall; pause_prompt ;;
             7) exit 0 ;;
             *) sleep 1 ;;
         esac
