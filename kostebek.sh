@@ -331,12 +331,28 @@ write_spoofdpi_runner() {
     tmp_runner="$(mktemp)"
     trap 'rm -f "${tmp_runner:-}"; trap - RETURN' RETURN
 
-    {
-        say "#!/usr/bin/env bash"
-        printf 'exec /usr/bin/script -q /dev/null'
-        printf ' %q' "$SPOOFDPI_SYSTEM" "${SPOOFDPI_ARGS[@]}"
-        printf '\n'
-    } > "$tmp_runner"
+    cat > "$tmp_runner" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+BIN="$SPOOFDPI_SYSTEM"
+ARGS=(
+EOF
+
+    local arg
+    for arg in "${SPOOFDPI_ARGS[@]}"; do
+        printf '  %q\n' "$arg" >> "$tmp_runner"
+    done
+
+    cat >> "$tmp_runner" <<'EOF'
+)
+
+if "$BIN" --silent --version >/dev/null 2>&1; then
+  ARGS+=(--silent)
+fi
+
+exec /usr/bin/script -q /dev/null "$BIN" "${ARGS[@]}"
+EOF
 
     run_step 5 "Installing SpoofDPI runner" cp -f "$tmp_runner" "$SPOOFDPI_RUNNER"
     run_step 5 "Setting runner owner" chown root:wheel "$SPOOFDPI_RUNNER"
