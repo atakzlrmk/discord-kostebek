@@ -17,11 +17,7 @@ A small CLI wrapper around [SpoofDPI](https://github.com/xvzc/SpoofDPI) for Disc
 
 ### macOS / Linux
 
-```bash
-./cli-menu.command
-```
-
-Or call the core script directly:
+Run the core CLI script directly:
 
 ```bash
 sudo ./kostebek.sh temp       # run until the terminal is closed
@@ -48,15 +44,11 @@ Run PowerShell as Administrator:
 ```
 discord_kostebek/
 ├── kostebek.sh             # macOS/Linux core: menu, temp, service
-├── cli-menu.command        # macOS/Linux CLI launcher
-├── manage-service.sh       # macOS/Linux compatibility wrapper
-├── run-temp.sh             # macOS/Linux compatibility wrapper
 ├── manage-service.ps1      # Windows:     install, pause, resume, uninstall
-├── run-temp.ps1            # Windows:     temporary foreground runner
 └── README.md
 ```
 
-On macOS/Linux, service management flows through **`kostebek.sh`**. The older `.command` and `.sh` files are kept as small launchers so existing shortcuts still work.
+On macOS/Linux, everything flows through **`kostebek.sh`**.
 
 ## Requirements
 
@@ -84,11 +76,7 @@ On macOS/Linux, service management flows through **`kostebek.sh`**. The older `.
 
 ### macOS / Linux
 
-```bash
-./cli-menu.command
-```
-
-Veya ana scripti doğrudan çağırın:
+Ana CLI scriptini doğrudan çağırın:
 
 ```bash
 sudo ./kostebek.sh temp
@@ -115,11 +103,7 @@ PowerShell'i Administrator olarak açın:
 ```
 discord_kostebek/
 ├── kostebek.sh             # macOS/Linux ana CLI ve servis scripti
-├── cli-menu.command        # macOS/Linux terminal menüsü
-├── manage-service.sh       # macOS/Linux uyumluluk wrapper'ı
-├── run-temp.sh             # macOS/Linux uyumluluk wrapper'ı
 ├── manage-service.ps1      # Windows:     kur, duraklat, devam et, kaldır
-├── run-temp.ps1            # Windows:     geçici çalıştırma
 └── README.md
 ```
 
