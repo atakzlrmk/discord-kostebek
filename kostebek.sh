@@ -2,6 +2,7 @@
 set -euo pipefail
 
 PLIST="/Library/LaunchDaemons/com.superonline.discordbypass.plist"
+LABEL="com.superonline.discordbypass"
 SERVICE="discordbypass.service"
 SPOOFDPI_SYSTEM="/usr/local/bin/spoofdpi"
 
@@ -35,11 +36,11 @@ need_cmd() {
 status() {
     case "$(uname -s)" in
         Darwin)
-            if launchctl list 2>/dev/null | grep -q "com.superonline.discordbypass"; then
+            if launchctl print "system/$LABEL" >/dev/null 2>&1; then
                 say "Status: background service running"
                 return 0
             fi
-            if pgrep -f spoofdpi >/dev/null 2>&1; then
+            if pgrep -f spoofdpi >/dev/null 2>&1 || ps ax 2>/dev/null | grep -v grep | grep -q spoofdpi; then
                 say "Status: temporary mode running"
                 return 0
             fi
@@ -53,7 +54,7 @@ status() {
                 say "Status: background service running"
                 return 0
             fi
-            if pgrep -f spoofdpi >/dev/null 2>&1; then
+            if pgrep -f spoofdpi >/dev/null 2>&1 || ps ax 2>/dev/null | grep -v grep | grep -q spoofdpi; then
                 say "Status: temporary mode running"
                 return 0
             fi
@@ -69,21 +70,29 @@ status() {
 
 network_service() {
     local iface
-    iface="$(route get default 2>/dev/null | awk '/interface:/ {print $2; exit}')"
+    iface="$(route get default 2>/dev/null | awk '/interface:/ {print $2; exit}' || true)"
     if [ -n "$iface" ]; then
         networksetup -listnetworkserviceorder 2>/dev/null \
             | grep -B 1 "Device: $iface" \
             | head -n 1 \
-            | sed -E 's/^\(\*?[0-9]+\) //'
+            | sed -E 's/^\(\*?[0-9]+\) //' \
+            || say "Wi-Fi"
     else
         say "Wi-Fi"
     fi
+}
+
+stop_spoofdpi_processes() {
+    pkill -x spoofdpi 2>/dev/null || true
+    pkill -f "/spoofdpi" 2>/dev/null || true
+    killall spoofdpi 2>/dev/null || true
 }
 
 proxy_on() {
     [ "$(uname -s)" = "Darwin" ] || return 0
     local svc
     svc="$(network_service)"
+    [ -n "$svc" ] || return 0
     networksetup -setwebproxy "$svc" 127.0.0.1 8080
     networksetup -setsecurewebproxy "$svc" 127.0.0.1 8080
     networksetup -setwebproxystate "$svc" on
@@ -94,6 +103,7 @@ proxy_off() {
     [ "$(uname -s)" = "Darwin" ] || return 0
     local svc
     svc="$(network_service)"
+    [ -n "$svc" ] || return 0
     networksetup -setwebproxystate "$svc" off 2>/dev/null || true
     networksetup -setsecurewebproxystate "$svc" off 2>/dev/null || true
 }
@@ -200,10 +210,13 @@ install_service() {
 EOF
             chown root:wheel "$PLIST"
             chmod 644 "$PLIST"
-            launchctl unload "$PLIST" 2>/dev/null || true
-            launchctl load -w "$PLIST"
+            launchctl bootout "system/$LABEL" 2>/dev/null || true
+            launchctl bootstrap system "$PLIST"
+            launchctl enable "system/$LABEL" 2>/dev/null || true
+            launchctl kickstart -k "system/$LABEL" 2>/dev/null || true
             wait_for_port || {
-                launchctl unload "$PLIST" 2>/dev/null || true
+                launchctl bootout "system/$LABEL" 2>/dev/null || true
+                launchctl bootout system "$PLIST" 2>/dev/null || true
                 proxy_off
                 say "SpoofDPI did not start on 127.0.0.1:8080."
                 [ -f /var/log/discordbypass_err.log ] && tail -n 20 /var/log/discordbypass_err.log
@@ -239,10 +252,14 @@ EOF
 pause_service() {
     require_root pause
     case "$(uname -s)" in
-        Darwin) launchctl unload "$PLIST" 2>/dev/null || true ;;
+        Darwin)
+            launchctl bootout "system/$LABEL" 2>/dev/null || true
+            launchctl bootout system "$PLIST" 2>/dev/null || true
+            launchctl disable "system/$LABEL" 2>/dev/null || true
+            ;;
         Linux) systemctl stop "$SERVICE" 2>/dev/null || true ;;
     esac
-    killall spoofdpi 2>/dev/null || true
+    stop_spoofdpi_processes
     proxy_off
     say "Service paused."
 }
@@ -251,7 +268,13 @@ resume_service() {
     require_root resume
     case "$(uname -s)" in
         Darwin)
-            launchctl load -w "$PLIST" 2>/dev/null || true
+            if [ ! -f "$PLIST" ]; then
+                say "Service is not installed. Run: sudo $0 install"
+                exit 1
+            fi
+            launchctl bootstrap system "$PLIST" 2>/dev/null || true
+            launchctl enable "system/$LABEL" 2>/dev/null || true
+            launchctl kickstart -k "system/$LABEL" 2>/dev/null || true
             wait_for_port || { proxy_off; say "SpoofDPI did not start."; exit 1; }
             proxy_on
             ;;
@@ -266,7 +289,9 @@ uninstall_service() {
     require_root uninstall
     case "$(uname -s)" in
         Darwin)
-            launchctl unload "$PLIST" 2>/dev/null || true
+            launchctl bootout "system/$LABEL" 2>/dev/null || true
+            launchctl bootout system "$PLIST" 2>/dev/null || true
+            launchctl disable "system/$LABEL" 2>/dev/null || true
             rm -f "$PLIST"
             ;;
         Linux)
@@ -275,7 +300,7 @@ uninstall_service() {
             systemctl daemon-reload
             ;;
     esac
-    killall spoofdpi 2>/dev/null || true
+    stop_spoofdpi_processes
     proxy_off
     rm -f "$SPOOFDPI_SYSTEM"
     say "Service uninstalled."
