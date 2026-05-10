@@ -241,7 +241,7 @@ proxy_off() {
 }
 
 wait_for_port() {
-    local attempts=20
+    local attempts=60
     info "Waiting for SpoofDPI on 127.0.0.1:8080"
     while [ "$attempts" -gt 0 ]; do
         if nc -z 127.0.0.1 8080 >/dev/null 2>&1; then
@@ -253,6 +253,21 @@ wait_for_port() {
     done
     warn "SpoofDPI did not open 127.0.0.1:8080 in time"
     return 1
+}
+
+print_service_logs() {
+    local stdout_log="$1"
+    local stderr_log="$2"
+
+    if [ -f "$stderr_log" ] && [ -s "$stderr_log" ]; then
+        say "Last service errors:"
+        tail -n 40 "$stderr_log"
+    fi
+
+    if [ -f "$stdout_log" ] && [ -s "$stdout_log" ]; then
+        say "Last service output:"
+        tail -n 40 "$stdout_log"
+    fi
 }
 
 install_spoofdpi() {
@@ -469,12 +484,11 @@ install_service() {
             clear_service_logs "$stdout_log" "$stderr_log"
             run_step 10 "Bootstrapping LaunchAgent" mac_launchctl bootstrap "$domain" "$agent_plist" || true
             run_step 5 "Enabling LaunchAgent" mac_launchctl enable "$domain/$LABEL" || true
-            run_step 3 "Starting LaunchAgent" mac_launchctl kickstart -k "$domain/$LABEL" || true
             wait_for_port || {
+                print_service_logs "$stdout_log" "$stderr_log"
                 run_step 5 "Cleaning up failed LaunchAgent" mac_launchctl bootout "$domain/$LABEL" || true
                 proxy_off
                 say "SpoofDPI did not start on 127.0.0.1:8080."
-                [ -f "$stderr_log" ] && tail -n 20 "$stderr_log"
                 exit 1
             }
             proxy_on
@@ -530,7 +544,6 @@ resume_service() {
             fi
             run_step 10 "Bootstrapping LaunchAgent" mac_launchctl bootstrap "$(mac_domain)" "$(mac_agent_plist)" || true
             run_step 5 "Enabling LaunchAgent" mac_launchctl enable "$(mac_domain)/$LABEL" || true
-            run_step 3 "Starting LaunchAgent" mac_launchctl kickstart -k "$(mac_domain)/$LABEL" || true
             wait_for_port || { proxy_off; say "SpoofDPI did not start."; exit 1; }
             proxy_on
             ;;
