@@ -13,7 +13,6 @@ SPOOFDPI_ARGS=(
     --https-split-mode chunk
     --https-chunk-size 1
     --https-fake-count 1
-    --silent
 )
 
 if [ -t 1 ] && command -v tput >/dev/null 2>&1 && [ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]; then
@@ -353,10 +352,19 @@ EOF
 
     cat >> "$tmp_plist" <<EOF
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>TERM</key>
+        <string>dumb</string>
+        <key>NO_COLOR</key>
+        <string>1</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>StandardInputPath</key>
+    <string>/dev/null</string>
     <key>StandardOutPath</key>
     <string>$stdout_log</string>
     <key>StandardErrorPath</key>
@@ -428,7 +436,7 @@ install_service() {
             clear_service_logs "$stdout_log" "$stderr_log"
             run_step 10 "Bootstrapping LaunchAgent" mac_launchctl bootstrap "$domain" "$agent_plist" || true
             run_step 5 "Enabling LaunchAgent" mac_launchctl enable "$domain/$LABEL" || true
-            run_step 10 "Starting LaunchAgent" mac_launchctl kickstart -k "$domain/$LABEL" || true
+            run_step 3 "Starting LaunchAgent" mac_launchctl kickstart -k "$domain/$LABEL" || true
             wait_for_port || {
                 run_step 5 "Cleaning up failed LaunchAgent" mac_launchctl bootout "$domain/$LABEL" || true
                 proxy_off
@@ -489,7 +497,7 @@ resume_service() {
             fi
             run_step 10 "Bootstrapping LaunchAgent" mac_launchctl bootstrap "$(mac_domain)" "$(mac_agent_plist)" || true
             run_step 5 "Enabling LaunchAgent" mac_launchctl enable "$(mac_domain)/$LABEL" || true
-            run_step 10 "Starting LaunchAgent" mac_launchctl kickstart -k "$(mac_domain)/$LABEL" || true
+            run_step 3 "Starting LaunchAgent" mac_launchctl kickstart -k "$(mac_domain)/$LABEL" || true
             wait_for_port || { proxy_off; say "SpoofDPI did not start."; exit 1; }
             proxy_on
             ;;
