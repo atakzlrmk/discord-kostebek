@@ -134,7 +134,7 @@ install_spoofdpi() {
     esac
 
     tmp="$(mktemp -d)"
-    trap 'rm -rf "$tmp"' RETURN
+    trap 'rm -rf "${tmp:-}"; trap - RETURN' RETURN
 
     say "Resolving latest SpoofDPI release..."
     release_json="$(curl -fsSL https://api.github.com/repos/xvzc/SpoofDPI/releases/latest)"
