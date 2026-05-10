@@ -288,6 +288,67 @@ prepare_binary_for_launchd() {
     run_step 5 "Clearing SpoofDPI binary attributes" xattr -c "$SPOOFDPI_SYSTEM" || true
 }
 
+write_launchdaemon_plist() {
+    local tmp_plist
+    tmp_plist="$(mktemp)"
+    trap 'rm -f "${tmp_plist:-}"; trap - RETURN' RETURN
+
+    cat > "$tmp_plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$LABEL</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$SPOOFDPI_SYSTEM</string>
+EOF
+
+    local arg
+    for arg in "${SPOOFDPI_ARGS[@]}"; do
+        printf '        <string>%s</string>\n' "$arg" >> "$tmp_plist"
+    done
+
+    cat >> "$tmp_plist" <<EOF
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/var/log/discordbypass.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/discordbypass_err.log</string>
+</dict>
+</plist>
+EOF
+
+    run_step 5 "Validating generated plist" plutil -lint "$tmp_plist"
+    run_step 5 "Installing LaunchDaemon plist" cp -f "$tmp_plist" "$PLIST"
+}
+
+verify_launchdaemon_plist() {
+    run_step 5 "Validating installed plist" plutil -lint "$PLIST"
+
+    if grep -q -- "--system-proxy\|--no-tui" "$PLIST"; then
+        fail "Installed plist still contains obsolete SpoofDPI flags."
+        plutil -p "$PLIST" || true
+        exit 1
+    fi
+
+    say "LaunchDaemon arguments:"
+    plutil -p "$PLIST" | sed -n '/ProgramArguments/,/]/p'
+}
+
+clear_service_logs() {
+    say "Clearing previous service logs..."
+    rm -f /var/log/discordbypass.log /var/log/discordbypass_err.log
+    touch /var/log/discordbypass.log /var/log/discordbypass_err.log
+    chown root:wheel /var/log/discordbypass.log /var/log/discordbypass_err.log 2>/dev/null || true
+    chmod 644 /var/log/discordbypass.log /var/log/discordbypass_err.log 2>/dev/null || true
+}
+
 install_service() {
     require_root install
     say "Starting background service install..."
@@ -301,37 +362,12 @@ install_service() {
             say "Removing old plist..."
             rm -f "$PLIST"
             say "Writing LaunchDaemon plist to $PLIST..."
-            cat > "$PLIST" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key><string>com.superonline.discordbypass</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>$SPOOFDPI_SYSTEM</string>
-        <string>--clean</string>
-        <string>--listen-addr</string><string>127.0.0.1:8080</string>
-        <string>--dns-mode</string><string>https</string>
-        <string>--https-split-mode</string><string>chunk</string>
-        <string>--https-chunk-size</string><string>1</string>
-        <string>--https-fake-count</string><string>1</string>
-        <string>--silent</string>
-    </array>
-    <key>RunAtLoad</key><true/>
-    <key>KeepAlive</key><true/>
-    <key>StandardOutPath</key><string>/var/log/discordbypass.log</string>
-    <key>StandardErrorPath</key><string>/var/log/discordbypass_err.log</string>
-</dict>
-</plist>
-EOF
+            write_launchdaemon_plist
             run_step 5 "Setting plist owner" chown root:wheel "$PLIST"
             run_step 5 "Setting plist permissions" chmod 644 "$PLIST"
             run_step 5 "Clearing plist attributes" xattr -c "$PLIST" || true
-            run_step 5 "Validating plist" plutil -lint "$PLIST"
-            say "Clearing previous service logs..."
-            : > /var/log/discordbypass.log
-            : > /var/log/discordbypass_err.log
+            verify_launchdaemon_plist
+            clear_service_logs
             run_step 10 "Bootstrapping LaunchDaemon" launchctl bootstrap system "$PLIST" || true
             run_step 5 "Enabling LaunchDaemon" launchctl enable "system/$LABEL" || true
             run_step 10 "Starting LaunchDaemon" launchctl kickstart -k "system/$LABEL" || true
