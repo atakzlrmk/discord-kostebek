@@ -70,6 +70,40 @@ need_cmd() {
     }
 }
 
+mac_user() {
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+        say "$SUDO_USER"
+    else
+        id -un
+    fi
+}
+
+mac_uid() {
+    id -u "$(mac_user)"
+}
+
+mac_home() {
+    local user
+    user="$(mac_user)"
+    dscl . -read "/Users/$user" NFSHomeDirectory 2>/dev/null | awk '{print $2}' || eval echo "~$user"
+}
+
+mac_domain() {
+    say "gui/$(mac_uid)"
+}
+
+mac_agent_plist() {
+    say "$(mac_home)/Library/LaunchAgents/$LABEL.plist"
+}
+
+mac_stdout_log() {
+    say "$(mac_home)/Library/Logs/discordbypass.log"
+}
+
+mac_stderr_log() {
+    say "$(mac_home)/Library/Logs/discordbypass_err.log"
+}
+
 run_step() {
     local seconds="$1"
     local label="$2"
@@ -104,7 +138,7 @@ run_step() {
 status_key() {
     case "$(uname -s)" in
         Darwin)
-            if launchctl print "system/$LABEL" >/dev/null 2>&1; then
+            if launchctl print "$(mac_domain)/$LABEL" >/dev/null 2>&1 || launchctl print "system/$LABEL" >/dev/null 2>&1; then
                 say "running"
                 return 0
             fi
@@ -112,7 +146,7 @@ status_key() {
                 say "temporary"
                 return 0
             fi
-            if [ -f "$PLIST" ]; then
+            if [ -f "$(mac_agent_plist)" ] || [ -f "$PLIST" ]; then
                 say "paused"
                 return 0
             fi
@@ -288,7 +322,10 @@ prepare_binary_for_launchd() {
     run_step 5 "Clearing SpoofDPI binary attributes" xattr -c "$SPOOFDPI_SYSTEM" || true
 }
 
-write_launchdaemon_plist() {
+write_launch_plist() {
+    local target_plist="$1"
+    local stdout_log="$2"
+    local stderr_log="$3"
     local tmp_plist
     tmp_plist="$(mktemp)"
     trap 'rm -f "${tmp_plist:-}"; trap - RETURN' RETURN
@@ -317,36 +354,44 @@ EOF
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/var/log/discordbypass.log</string>
+    <string>$stdout_log</string>
     <key>StandardErrorPath</key>
-    <string>/var/log/discordbypass_err.log</string>
+    <string>$stderr_log</string>
 </dict>
 </plist>
 EOF
 
     run_step 5 "Validating generated plist" plutil -lint "$tmp_plist"
-    run_step 5 "Installing LaunchDaemon plist" cp -f "$tmp_plist" "$PLIST"
+    run_step 5 "Installing launchd plist" cp -f "$tmp_plist" "$target_plist"
 }
 
-verify_launchdaemon_plist() {
-    run_step 5 "Validating installed plist" plutil -lint "$PLIST"
+verify_launch_plist() {
+    local target_plist="$1"
 
-    if grep -q -- "--system-proxy\|--no-tui" "$PLIST"; then
+    run_step 5 "Validating installed plist" plutil -lint "$target_plist"
+
+    if grep -q -- "--system-proxy\|--no-tui" "$target_plist"; then
         fail "Installed plist still contains obsolete SpoofDPI flags."
-        plutil -p "$PLIST" || true
+        plutil -p "$target_plist" || true
         exit 1
     fi
 
-    say "LaunchDaemon arguments:"
-    plutil -p "$PLIST" | sed -n '/ProgramArguments/,/]/p'
+    say "launchd arguments:"
+    plutil -p "$target_plist" | sed -n '/ProgramArguments/,/]/p'
 }
 
 clear_service_logs() {
+    local stdout_log="$1"
+    local stderr_log="$2"
+    local user
+    user="$(mac_user)"
+
     say "Clearing previous service logs..."
-    rm -f /var/log/discordbypass.log /var/log/discordbypass_err.log
-    touch /var/log/discordbypass.log /var/log/discordbypass_err.log
-    chown root:wheel /var/log/discordbypass.log /var/log/discordbypass_err.log 2>/dev/null || true
-    chmod 644 /var/log/discordbypass.log /var/log/discordbypass_err.log 2>/dev/null || true
+    mkdir -p "$(dirname "$stdout_log")"
+    rm -f "$stdout_log" "$stderr_log"
+    touch "$stdout_log" "$stderr_log"
+    chown "$user":staff "$stdout_log" "$stderr_log" 2>/dev/null || true
+    chmod 644 "$stdout_log" "$stderr_log" 2>/dev/null || true
 }
 
 install_service() {
@@ -357,26 +402,34 @@ install_service() {
 
     case "$(uname -s)" in
         Darwin)
-            run_step 5 "Booting out existing $LABEL" launchctl bootout "system/$LABEL" || true
+            local agent_plist domain user stdout_log stderr_log
+            user="$(mac_user)"
+            domain="$(mac_domain)"
+            agent_plist="$(mac_agent_plist)"
+            stdout_log="$(mac_stdout_log)"
+            stderr_log="$(mac_stderr_log)"
+
+            run_step 5 "Booting out existing LaunchAgent" launchctl bootout "$domain/$LABEL" || true
+            run_step 5 "Booting out old LaunchDaemon" launchctl bootout "system/$LABEL" || true
             stop_spoofdpi_processes
-            say "Removing old plist..."
-            rm -f "$PLIST"
-            say "Writing LaunchDaemon plist to $PLIST..."
-            write_launchdaemon_plist
-            run_step 5 "Setting plist owner" chown root:wheel "$PLIST"
-            run_step 5 "Setting plist permissions" chmod 644 "$PLIST"
-            run_step 5 "Clearing plist attributes" xattr -c "$PLIST" || true
-            verify_launchdaemon_plist
-            clear_service_logs
-            run_step 10 "Bootstrapping LaunchDaemon" launchctl bootstrap system "$PLIST" || true
-            run_step 5 "Enabling LaunchDaemon" launchctl enable "system/$LABEL" || true
-            run_step 10 "Starting LaunchDaemon" launchctl kickstart -k "system/$LABEL" || true
+            say "Removing old plist files..."
+            rm -f "$PLIST" "$agent_plist"
+            run_step 5 "Creating LaunchAgents directory" mkdir -p "$(dirname "$agent_plist")"
+            say "Writing LaunchAgent plist to $agent_plist..."
+            write_launch_plist "$agent_plist" "$stdout_log" "$stderr_log"
+            run_step 5 "Setting plist owner" chown "$user":staff "$agent_plist"
+            run_step 5 "Setting plist permissions" chmod 644 "$agent_plist"
+            run_step 5 "Clearing plist attributes" xattr -c "$agent_plist" || true
+            verify_launch_plist "$agent_plist"
+            clear_service_logs "$stdout_log" "$stderr_log"
+            run_step 10 "Bootstrapping LaunchAgent" launchctl bootstrap "$domain" "$agent_plist" || true
+            run_step 5 "Enabling LaunchAgent" launchctl enable "$domain/$LABEL" || true
+            run_step 10 "Starting LaunchAgent" launchctl kickstart -k "$domain/$LABEL" || true
             wait_for_port || {
-                run_step 5 "Cleaning up failed launchd service" launchctl bootout "system/$LABEL" || true
-                run_step 5 "Cleaning up failed plist bootstrap" launchctl bootout system "$PLIST" || true
+                run_step 5 "Cleaning up failed LaunchAgent" launchctl bootout "$domain/$LABEL" || true
                 proxy_off
                 say "SpoofDPI did not start on 127.0.0.1:8080."
-                [ -f /var/log/discordbypass_err.log ] && tail -n 20 /var/log/discordbypass_err.log
+                [ -f "$stderr_log" ] && tail -n 20 "$stderr_log"
                 exit 1
             }
             proxy_on
@@ -411,9 +464,9 @@ pause_service() {
     require_root pause
     case "$(uname -s)" in
         Darwin)
-            run_step 5 "Booting out $LABEL" launchctl bootout "system/$LABEL" || true
-            run_step 5 "Booting out plist" launchctl bootout system "$PLIST" || true
-            run_step 5 "Disabling launchd service" launchctl disable "system/$LABEL" || true
+            run_step 5 "Booting out LaunchAgent" launchctl bootout "$(mac_domain)/$LABEL" || true
+            run_step 5 "Booting out old LaunchDaemon" launchctl bootout "system/$LABEL" || true
+            run_step 5 "Disabling LaunchAgent" launchctl disable "$(mac_domain)/$LABEL" || true
             ;;
         Linux) run_step 10 "Stopping systemd service" systemctl stop "$SERVICE" || true ;;
     esac
@@ -426,13 +479,13 @@ resume_service() {
     require_root resume
     case "$(uname -s)" in
         Darwin)
-            if [ ! -f "$PLIST" ]; then
+            if [ ! -f "$(mac_agent_plist)" ]; then
                 say "Service is not installed. Run: sudo $0 install"
                 exit 1
             fi
-            run_step 10 "Bootstrapping LaunchDaemon" launchctl bootstrap system "$PLIST" || true
-            run_step 5 "Enabling LaunchDaemon" launchctl enable "system/$LABEL" || true
-            run_step 10 "Starting LaunchDaemon" launchctl kickstart -k "system/$LABEL" || true
+            run_step 10 "Bootstrapping LaunchAgent" launchctl bootstrap "$(mac_domain)" "$(mac_agent_plist)" || true
+            run_step 5 "Enabling LaunchAgent" launchctl enable "$(mac_domain)/$LABEL" || true
+            run_step 10 "Starting LaunchAgent" launchctl kickstart -k "$(mac_domain)/$LABEL" || true
             wait_for_port || { proxy_off; say "SpoofDPI did not start."; exit 1; }
             proxy_on
             ;;
@@ -447,11 +500,11 @@ uninstall_service() {
     require_root uninstall
     case "$(uname -s)" in
         Darwin)
-            run_step 5 "Booting out $LABEL" launchctl bootout "system/$LABEL" || true
-            run_step 5 "Booting out plist" launchctl bootout system "$PLIST" || true
-            run_step 5 "Disabling launchd service" launchctl disable "system/$LABEL" || true
-            say "Removing plist..."
-            rm -f "$PLIST"
+            run_step 5 "Booting out LaunchAgent" launchctl bootout "$(mac_domain)/$LABEL" || true
+            run_step 5 "Booting out old LaunchDaemon" launchctl bootout "system/$LABEL" || true
+            run_step 5 "Disabling LaunchAgent" launchctl disable "$(mac_domain)/$LABEL" || true
+            say "Removing plist files..."
+            rm -f "$(mac_agent_plist)" "$PLIST"
             ;;
         Linux)
             run_step 10 "Disabling systemd service" systemctl disable --now "$SERVICE" || true
@@ -518,6 +571,14 @@ pause_prompt() {
     read -r -p "Press ENTER to continue..." _
 }
 
+run_root_action() {
+    if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+        "$0" "$@"
+    else
+        sudo "$0" "$@"
+    fi
+}
+
 menu() {
     while true; do
         print_header
@@ -532,11 +593,11 @@ menu() {
         read -r -p "Choice [1-7]: " choice
         case "$choice" in
             1) "$0" status; pause_prompt ;;
-            2) sudo "$0" temp; pause_prompt ;;
-            3) sudo "$0" install; pause_prompt ;;
-            4) sudo "$0" pause; pause_prompt ;;
-            5) sudo "$0" resume; pause_prompt ;;
-            6) sudo "$0" uninstall; pause_prompt ;;
+            2) run_root_action temp; pause_prompt ;;
+            3) run_root_action install; pause_prompt ;;
+            4) run_root_action pause; pause_prompt ;;
+            5) run_root_action resume; pause_prompt ;;
+            6) run_root_action uninstall; pause_prompt ;;
             7) exit 0 ;;
             *) sleep 1 ;;
         esac
