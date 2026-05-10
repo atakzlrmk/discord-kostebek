@@ -5,6 +5,7 @@ import subprocess
 import os
 import sys
 import platform
+import shlex
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 1337
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -88,7 +89,8 @@ def run_elevated(action):
     """Run manage-service script with admin privileges (cross-platform)."""
     if IS_MAC:
         manage = os.path.join(BASE_DIR, 'manage-service.sh')
-        script = f'do shell script "\'\\{manage}\' {action}" with administrator privileges'
+        command = f"{shlex.quote(manage)} {shlex.quote(action)}"
+        script = f"do shell script {json.dumps(command)} with administrator privileges"
         subprocess.Popen(["osascript", "-e", script])
     elif IS_WINDOWS:
         manage = os.path.join(BASE_DIR, 'manage-service.ps1')
@@ -105,8 +107,9 @@ def run_elevated(action):
 def open_temp_terminal():
     """Open a new terminal running the temp script (cross-platform)."""
     if IS_MAC:
+        command = f"cd {shlex.quote(BASE_DIR)} && sudo ./run-temp.sh"
         script = f'''tell application "Terminal"
-            do script "cd '{BASE_DIR}' && sudo ./run-temp.sh"
+            do script {json.dumps(command)}
             activate
         end tell'''
         subprocess.Popen(["osascript", "-e", script])

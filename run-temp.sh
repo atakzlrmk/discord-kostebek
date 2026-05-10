@@ -6,6 +6,7 @@
 
 BIN_DIR="$HOME/.local/bin"
 SPOOFDPI="$BIN_DIR/spoofdpi"
+BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
 export PATH="$BIN_DIR:/usr/local/bin:$PATH"
 
 # Find active network service
@@ -41,8 +42,7 @@ echo "[+] Active network: $SERVICE_NAME"
 # Install SpoofDPI if missing
 if ! command -v spoofdpi &>/dev/null; then
     echo "[*] SpoofDPI not found, downloading..."
-    mkdir -p "$BIN_DIR"
-    curl -fsSL https://raw.githubusercontent.com/xvzc/SpoofDPI/main/install.sh | INSTALL_PATH="$BIN_DIR" bash
+    bash "$BASE_DIR/install-spoofdpi.sh" "$BIN_DIR"
 fi
 
 if ! command -v spoofdpi &>/dev/null; then

@@ -8,6 +8,7 @@
 
 PLIST="/Library/LaunchDaemons/com.superonline.discordbypass.plist"
 SPOOFDPI_BIN="/usr/local/bin/spoofdpi"
+BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -33,6 +34,37 @@ proxy_off() {
     networksetup -setsecurewebproxystate "$svc" off 2>/dev/null
 }
 
+proxy_on() {
+    local svc=$(get_service_name)
+    echo -e "${BLUE}[*] Enabling proxy on $svc...${NC}"
+    networksetup -setwebproxy "$svc" 127.0.0.1 8080
+    networksetup -setsecurewebproxy "$svc" 127.0.0.1 8080
+    networksetup -setwebproxystate "$svc" on
+    networksetup -setsecurewebproxystate "$svc" on
+}
+
+wait_for_proxy_port() {
+    local attempts=20
+
+    while [ "$attempts" -gt 0 ]; do
+        if nc -z 127.0.0.1 8080 >/dev/null 2>&1; then
+            return 0
+        fi
+
+        sleep 0.5
+        attempts=$((attempts - 1))
+    done
+
+    return 1
+}
+
+print_service_logs() {
+    if [ -f /var/log/discordbypass_err.log ]; then
+        echo -e "${BLUE}[*] Last service errors:${NC}"
+        tail -n 20 /var/log/discordbypass_err.log
+    fi
+}
+
 ACTION="$1"
 
 case "$ACTION" in
@@ -45,9 +77,9 @@ case "$ACTION" in
 
         OS="$(uname -s)"
         echo -e "${BLUE}[*] Installing SpoofDPI...${NC}"
-        curl -fsSL https://raw.githubusercontent.com/xvzc/SpoofDPI/main/install.sh | INSTALL_PATH="/usr/local/bin" bash
+        bash "$BASE_DIR/install-spoofdpi.sh" "/usr/local/bin"
 
-        if [ ! -f "$SPOOFDPI_BIN" ]; then
+        if [ ! -x "$SPOOFDPI_BIN" ]; then
             echo -e "${RED}[-] SpoofDPI installation failed.${NC}"
             exit 1
         fi
@@ -74,7 +106,7 @@ case "$ACTION" in
         <string>1</string>
         <string>--https-fake-count</string>
         <string>1</string>
-        <string>--system-proxy</string>
+        <string>--no-tui</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -91,6 +123,16 @@ EOF
             chmod 644 "$PLIST"
             launchctl unload "$PLIST" 2>/dev/null
             launchctl load -w "$PLIST"
+
+            if ! wait_for_proxy_port; then
+                launchctl unload "$PLIST" 2>/dev/null
+                proxy_off
+                echo -e "${RED}[-] SpoofDPI service did not start on 127.0.0.1:8080. Proxy left disabled.${NC}"
+                print_service_logs
+                exit 1
+            fi
+
+            proxy_on
             echo -e "${GREEN}[OK] Background service installed and started.${NC}"
 
         elif [ "$OS" = "Linux" ]; then
@@ -102,7 +144,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=$SPOOFDPI_BIN --listen-addr 127.0.0.1:8080 --dns-mode https --https-split-mode chunk --https-chunk-size 1 --https-fake-count 1 --system-proxy
+ExecStart=$SPOOFDPI_BIN --listen-addr 127.0.0.1:8080 --dns-mode https --https-split-mode chunk --https-chunk-size 1 --https-fake-count 1 --no-tui
 Restart=always
 RestartSec=5
 
@@ -130,6 +172,14 @@ EOF
     resume)
         if [ "$EUID" -ne 0 ]; then echo -e "${RED}[!] Run with sudo${NC}"; exit 1; fi
         launchctl load -w "$PLIST" 2>/dev/null
+        if ! wait_for_proxy_port; then
+            launchctl unload "$PLIST" 2>/dev/null
+            proxy_off
+            echo -e "${RED}[-] SpoofDPI service did not start on 127.0.0.1:8080. Proxy left disabled.${NC}"
+            print_service_logs
+            exit 1
+        fi
+        proxy_on
         echo -e "${GREEN}[OK] Service resumed.${NC}"
         ;;
 
