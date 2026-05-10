@@ -8,11 +8,11 @@ SPOOFDPI_SYSTEM="/usr/local/bin/spoofdpi"
 
 SPOOFDPI_ARGS=(
     --listen-addr 127.0.0.1:8080
-    --dns-mode https
+    --dns-mode doh
     --https-split-mode chunk
     --https-chunk-size 1
     --https-fake-count 1
-    --no-tui
+    --silent
 )
 
 if [ -t 1 ] && command -v tput >/dev/null 2>&1 && [ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]; then
@@ -287,6 +287,10 @@ install_service() {
 
     case "$(uname -s)" in
         Darwin)
+            run_step 5 "Booting out existing $LABEL" launchctl bootout "system/$LABEL" || true
+            stop_spoofdpi_processes
+            say "Removing old plist..."
+            rm -f "$PLIST"
             say "Writing LaunchDaemon plist to $PLIST..."
             cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -298,11 +302,11 @@ install_service() {
     <array>
         <string>$SPOOFDPI_SYSTEM</string>
         <string>--listen-addr</string><string>127.0.0.1:8080</string>
-        <string>--dns-mode</string><string>https</string>
+        <string>--dns-mode</string><string>doh</string>
         <string>--https-split-mode</string><string>chunk</string>
         <string>--https-chunk-size</string><string>1</string>
         <string>--https-fake-count</string><string>1</string>
-        <string>--no-tui</string>
+        <string>--silent</string>
     </array>
     <key>RunAtLoad</key><true/>
     <key>KeepAlive</key><true/>
@@ -313,7 +317,10 @@ install_service() {
 EOF
             run_step 5 "Setting plist owner" chown root:wheel "$PLIST"
             run_step 5 "Setting plist permissions" chmod 644 "$PLIST"
-            run_step 5 "Booting out existing $LABEL" launchctl bootout "system/$LABEL" || true
+            run_step 5 "Validating plist" plutil -lint "$PLIST"
+            say "Clearing previous service logs..."
+            : > /var/log/discordbypass.log
+            : > /var/log/discordbypass_err.log
             run_step 10 "Bootstrapping LaunchDaemon" launchctl bootstrap system "$PLIST" || true
             run_step 5 "Enabling LaunchDaemon" launchctl enable "system/$LABEL" || true
             run_step 10 "Starting LaunchDaemon" launchctl kickstart -k "system/$LABEL" || true
