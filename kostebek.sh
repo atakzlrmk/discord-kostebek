@@ -8,7 +8,7 @@ SPOOFDPI_SYSTEM="/usr/local/bin/spoofdpi"
 
 SPOOFDPI_ARGS=(
     --listen-addr 127.0.0.1:8080
-    --dns-mode doh
+    --dns-mode https
     --https-split-mode chunk
     --https-chunk-size 1
     --https-fake-count 1
@@ -302,7 +302,7 @@ install_service() {
     <array>
         <string>$SPOOFDPI_SYSTEM</string>
         <string>--listen-addr</string><string>127.0.0.1:8080</string>
-        <string>--dns-mode</string><string>doh</string>
+        <string>--dns-mode</string><string>https</string>
         <string>--https-split-mode</string><string>chunk</string>
         <string>--https-chunk-size</string><string>1</string>
         <string>--https-fake-count</string><string>1</string>
