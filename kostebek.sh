@@ -7,6 +7,7 @@ SERVICE="discordbypass.service"
 SPOOFDPI_SYSTEM="/usr/local/bin/spoofdpi"
 
 SPOOFDPI_ARGS=(
+    --clean
     --listen-addr 127.0.0.1:8080
     --dns-mode https
     --https-split-mode chunk
@@ -280,10 +281,18 @@ install_spoofdpi() {
     say "SpoofDPI installed to $install_bin"
 }
 
+prepare_binary_for_launchd() {
+    [ "$(uname -s)" = "Darwin" ] || return 0
+    run_step 5 "Setting SpoofDPI binary owner" chown root:wheel "$SPOOFDPI_SYSTEM"
+    run_step 5 "Setting SpoofDPI binary permissions" chmod 755 "$SPOOFDPI_SYSTEM"
+    run_step 5 "Clearing SpoofDPI binary attributes" xattr -c "$SPOOFDPI_SYSTEM" || true
+}
+
 install_service() {
     require_root install
     say "Starting background service install..."
     install_spoofdpi "/usr/local/bin"
+    prepare_binary_for_launchd
 
     case "$(uname -s)" in
         Darwin)
@@ -301,6 +310,7 @@ install_service() {
     <key>ProgramArguments</key>
     <array>
         <string>$SPOOFDPI_SYSTEM</string>
+        <string>--clean</string>
         <string>--listen-addr</string><string>127.0.0.1:8080</string>
         <string>--dns-mode</string><string>https</string>
         <string>--https-split-mode</string><string>chunk</string>
@@ -317,6 +327,7 @@ install_service() {
 EOF
             run_step 5 "Setting plist owner" chown root:wheel "$PLIST"
             run_step 5 "Setting plist permissions" chmod 644 "$PLIST"
+            run_step 5 "Clearing plist attributes" xattr -c "$PLIST" || true
             run_step 5 "Validating plist" plutil -lint "$PLIST"
             say "Clearing previous service logs..."
             : > /var/log/discordbypass.log
