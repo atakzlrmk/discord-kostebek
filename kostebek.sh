@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLIST="/Library/LaunchDaemons/com.superonline.discordbypass.plist"
 SERVICE="discordbypass.service"
 SPOOFDPI_SYSTEM="/usr/local/bin/spoofdpi"
-SPOOFDPI_USER="$HOME/.local/bin/spoofdpi"
-PORT="${PORT:-1337}"
 
 SPOOFDPI_ARGS=(
     --listen-addr 127.0.0.1:8080
@@ -26,6 +23,48 @@ require_root() {
         say "Run with sudo: sudo $0 $1"
         exit 1
     fi
+}
+
+need_cmd() {
+    command -v "$1" >/dev/null 2>&1 || {
+        say "Missing required command: $1"
+        exit 1
+    }
+}
+
+status() {
+    case "$(uname -s)" in
+        Darwin)
+            if launchctl list 2>/dev/null | grep -q "com.superonline.discordbypass"; then
+                say "Status: background service running"
+                return 0
+            fi
+            if pgrep -f spoofdpi >/dev/null 2>&1; then
+                say "Status: temporary mode running"
+                return 0
+            fi
+            if [ -f "$PLIST" ]; then
+                say "Status: background service installed but paused"
+                return 0
+            fi
+            ;;
+        Linux)
+            if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+                say "Status: background service running"
+                return 0
+            fi
+            if pgrep -f spoofdpi >/dev/null 2>&1; then
+                say "Status: temporary mode running"
+                return 0
+            fi
+            if [ -f "/etc/systemd/system/$SERVICE" ]; then
+                say "Status: background service installed but stopped"
+                return 0
+            fi
+            ;;
+    esac
+
+    say "Status: stopped"
 }
 
 network_service() {
@@ -77,6 +116,9 @@ install_spoofdpi() {
         say "SpoofDPI already installed at $install_bin"
         return 0
     fi
+
+    need_cmd curl
+    need_cmd tar
 
     local os_name arch_pattern tmp release_json download_url archive extracted
     case "$(uname -s)" in
@@ -240,6 +282,8 @@ uninstall_service() {
 }
 
 run_temp() {
+    require_root temp
+
     if [ "${1:-}" = "stop" ]; then
         proxy_off
         killall spoofdpi 2>/dev/null || true
@@ -247,48 +291,33 @@ run_temp() {
         exit 0
     fi
 
-    export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
-    command -v spoofdpi >/dev/null 2>&1 || install_spoofdpi "$HOME/.local/bin"
+    install_spoofdpi "/usr/local/bin"
 
     trap 'proxy_off; say ""; say "Temporary mode stopped."' INT TERM EXIT
     proxy_on
     say "SpoofDPI temporary mode started. Keep this window open."
-    spoofdpi "${SPOOFDPI_ARGS[@]}"
-}
-
-dashboard() {
-    cd "$BASE_DIR"
-    while lsof -Pi :"$PORT" -sTCP:LISTEN -t >/dev/null 2>&1; do
-        PORT=$((PORT + 1))
-    done
-
-    say "Dashboard: http://localhost:$PORT"
-    python3 server.py "$PORT" &
-    local server_pid=$!
-    sleep 1
-    open "http://localhost:$PORT" 2>/dev/null || xdg-open "http://localhost:$PORT" 2>/dev/null || true
-    wait "$server_pid"
+    "$SPOOFDPI_SYSTEM" "${SPOOFDPI_ARGS[@]}"
 }
 
 menu() {
     while true; do
         clear
         say "Discord Kostebek"
-        say "1) Run temporarily"
-        say "2) Install background service"
-        say "3) Pause background service"
-        say "4) Resume background service"
-        say "5) Uninstall"
-        say "6) Open dashboard"
+        say "1) Show status"
+        say "2) Run temporarily"
+        say "3) Install background service"
+        say "4) Pause background service"
+        say "5) Resume background service"
+        say "6) Uninstall"
         say "7) Exit"
         read -r -p "Choice (1-7): " choice
         case "$choice" in
-            1) sudo "$0" temp; read -r -p "Press ENTER..." _ ;;
-            2) sudo "$0" install; read -r -p "Press ENTER..." _ ;;
-            3) sudo "$0" pause; read -r -p "Press ENTER..." _ ;;
-            4) sudo "$0" resume; read -r -p "Press ENTER..." _ ;;
-            5) sudo "$0" uninstall; read -r -p "Press ENTER..." _ ;;
-            6) "$0" dashboard ;;
+            1) "$0" status; read -r -p "Press ENTER..." _ ;;
+            2) sudo "$0" temp; read -r -p "Press ENTER..." _ ;;
+            3) sudo "$0" install; read -r -p "Press ENTER..." _ ;;
+            4) sudo "$0" pause; read -r -p "Press ENTER..." _ ;;
+            5) sudo "$0" resume; read -r -p "Press ENTER..." _ ;;
+            6) sudo "$0" uninstall; read -r -p "Press ENTER..." _ ;;
             7) exit 0 ;;
             *) sleep 1 ;;
         esac
@@ -296,12 +325,12 @@ menu() {
 }
 
 case "${1:-menu}" in
-    dashboard) dashboard ;;
     menu) menu ;;
+    status) status ;;
     temp) shift; run_temp "$@" ;;
     install) install_service ;;
     pause) pause_service ;;
     resume) resume_service ;;
     uninstall) uninstall_service ;;
-    *) say "Usage: $0 {dashboard|menu|temp|install|pause|resume|uninstall}"; exit 1 ;;
+    *) say "Usage: $0 {menu|status|temp|install|pause|resume|uninstall}"; exit 1 ;;
 esac
