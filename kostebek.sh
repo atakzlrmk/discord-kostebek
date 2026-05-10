@@ -5,6 +5,7 @@ PLIST="/Library/LaunchDaemons/com.superonline.discordbypass.plist"
 LABEL="com.superonline.discordbypass"
 SERVICE="discordbypass.service"
 SPOOFDPI_SYSTEM="/usr/local/bin/spoofdpi"
+SPOOFDPI_RUNNER="/usr/local/bin/kostebek-spoofdpi-runner"
 
 SPOOFDPI_ARGS=(
     --clean
@@ -325,6 +326,24 @@ prepare_binary_for_launchd() {
     run_step 5 "Clearing SpoofDPI binary attributes" xattr -c "$SPOOFDPI_SYSTEM" || true
 }
 
+write_spoofdpi_runner() {
+    local tmp_runner
+    tmp_runner="$(mktemp)"
+    trap 'rm -f "${tmp_runner:-}"; trap - RETURN' RETURN
+
+    {
+        say "#!/usr/bin/env bash"
+        printf 'exec /usr/bin/script -q /dev/null'
+        printf ' %q' "$SPOOFDPI_SYSTEM" "${SPOOFDPI_ARGS[@]}"
+        printf '\n'
+    } > "$tmp_runner"
+
+    run_step 5 "Installing SpoofDPI runner" cp -f "$tmp_runner" "$SPOOFDPI_RUNNER"
+    run_step 5 "Setting runner owner" chown root:wheel "$SPOOFDPI_RUNNER"
+    run_step 5 "Setting runner permissions" chmod 755 "$SPOOFDPI_RUNNER"
+    run_step 5 "Clearing runner attributes" xattr -c "$SPOOFDPI_RUNNER" || true
+}
+
 write_launch_plist() {
     local target_plist="$1"
     local stdout_log="$2"
@@ -342,13 +361,8 @@ write_launch_plist() {
     <string>$LABEL</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$SPOOFDPI_SYSTEM</string>
+        <string>$SPOOFDPI_RUNNER</string>
 EOF
-
-    local arg
-    for arg in "${SPOOFDPI_ARGS[@]}"; do
-        printf '        <string>%s</string>\n' "$arg" >> "$tmp_plist"
-    done
 
     cat >> "$tmp_plist" <<EOF
     </array>
@@ -390,6 +404,8 @@ verify_launch_plist() {
 
     say "launchd arguments:"
     plutil -p "$target_plist" | sed -n '/ProgramArguments/,/]/p'
+    say "runner command:"
+    sed -n '1,20p' "$SPOOFDPI_RUNNER"
 }
 
 clear_service_logs() {
@@ -411,6 +427,7 @@ install_service() {
     say "Starting background service install..."
     install_spoofdpi "/usr/local/bin"
     prepare_binary_for_launchd
+    write_spoofdpi_runner
 
     case "$(uname -s)" in
         Darwin)
@@ -528,7 +545,7 @@ uninstall_service() {
     stop_spoofdpi_processes
     proxy_off
     say "Removing SpoofDPI binary..."
-    rm -f "$SPOOFDPI_SYSTEM"
+    rm -f "$SPOOFDPI_SYSTEM" "$SPOOFDPI_RUNNER"
     say "Service uninstalled."
 }
 
