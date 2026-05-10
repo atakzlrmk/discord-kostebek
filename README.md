@@ -34,14 +34,15 @@ Your browser opens a dashboard where you can install, pause, and manage everythi
 
 ```
 discord_kostebek/
-├── open-dashboard.command  # macOS entry point
-├── open-dashboard.bat      # Windows entry point
-├── server.py               # Cross-platform HTTP server (serves UI + API)
-├── manage-service.sh       # macOS/Linux: install, pause, resume, uninstall
+├── kostebek.sh             # macOS/Linux core: menu, dashboard, temp, service
+├── cli-menu.command        # macOS/Linux CLI launcher
+├── open-dashboard.command  # macOS dashboard launcher
+├── open-dashboard.bat      # Windows dashboard launcher
+├── server.py               # HTTP server (serves UI + API)
+├── manage-service.sh       # macOS/Linux compatibility wrapper
+├── run-temp.sh             # macOS/Linux compatibility wrapper
 ├── manage-service.ps1      # Windows:     install, pause, resume, uninstall
-├── run-temp.sh             # macOS/Linux: temporary foreground runner
 ├── run-temp.ps1            # Windows:     temporary foreground runner
-├── cli-menu.command        # CLI menu (macOS/Linux)
 ├── web/
 │   ├── index.html
 │   ├── style.css
@@ -66,7 +67,7 @@ User clicks button in Dashboard
     launchctl / systemctl / schtasks + SpoofDPI
 ```
 
-All service management flows through **one script per platform**. The dashboard and CLI both call the same scripts — no duplicated logic.
+On macOS/Linux, service management now flows through **`kostebek.sh`**. The older `.command` and `.sh` files are kept as small launchers so existing shortcuts still work.
 
 ## 🛠 Requirements
 
@@ -109,14 +110,15 @@ Finder'da **`open-dashboard.command`** dosyasına çift tıklayın.
 
 ```
 discord_kostebek/
-├── open-dashboard.command  # macOS giriş noktası
-├── open-dashboard.bat      # Windows giriş noktası
-├── server.py               # Cross-platform sunucu (UI + API)
-├── manage-service.sh       # macOS/Linux: kur, duraklat, devam et, kaldır
+├── kostebek.sh             # macOS/Linux ana komut dosyası
+├── cli-menu.command        # macOS/Linux terminal menüsü
+├── open-dashboard.command  # macOS web arayüz başlatıcı
+├── open-dashboard.bat      # Windows web arayüz başlatıcı
+├── server.py               # HTTP sunucu (UI + API)
+├── manage-service.sh       # macOS/Linux uyumluluk wrapper'ı
+├── run-temp.sh             # macOS/Linux uyumluluk wrapper'ı
 ├── manage-service.ps1      # Windows:     kur, duraklat, devam et, kaldır
-├── run-temp.sh             # macOS/Linux: geçici çalıştırma
 ├── run-temp.ps1            # Windows:     geçici çalıştırma
-├── cli-menu.command        # Terminal menüsü (macOS/Linux)
 ├── web/
 │   ├── index.html
 │   ├── style.css
