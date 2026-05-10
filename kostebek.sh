@@ -92,6 +92,10 @@ mac_domain() {
     say "gui/$(mac_uid)"
 }
 
+mac_launchctl() {
+    launchctl asuser "$(mac_uid)" launchctl "$@"
+}
+
 mac_agent_plist() {
     say "$(mac_home)/Library/LaunchAgents/$LABEL.plist"
 }
@@ -138,7 +142,7 @@ run_step() {
 status_key() {
     case "$(uname -s)" in
         Darwin)
-            if launchctl print "$(mac_domain)/$LABEL" >/dev/null 2>&1 || launchctl print "system/$LABEL" >/dev/null 2>&1; then
+            if mac_launchctl print "$(mac_domain)/$LABEL" >/dev/null 2>&1 || launchctl print "system/$LABEL" >/dev/null 2>&1; then
                 say "running"
                 return 0
             fi
@@ -409,7 +413,7 @@ install_service() {
             stdout_log="$(mac_stdout_log)"
             stderr_log="$(mac_stderr_log)"
 
-            run_step 5 "Booting out existing LaunchAgent" launchctl bootout "$domain/$LABEL" || true
+            run_step 5 "Booting out existing LaunchAgent" mac_launchctl bootout "$domain/$LABEL" || true
             run_step 5 "Booting out old LaunchDaemon" launchctl bootout "system/$LABEL" || true
             stop_spoofdpi_processes
             say "Removing old plist files..."
@@ -422,11 +426,11 @@ install_service() {
             run_step 5 "Clearing plist attributes" xattr -c "$agent_plist" || true
             verify_launch_plist "$agent_plist"
             clear_service_logs "$stdout_log" "$stderr_log"
-            run_step 10 "Bootstrapping LaunchAgent" launchctl bootstrap "$domain" "$agent_plist" || true
-            run_step 5 "Enabling LaunchAgent" launchctl enable "$domain/$LABEL" || true
-            run_step 10 "Starting LaunchAgent" launchctl kickstart -k "$domain/$LABEL" || true
+            run_step 10 "Bootstrapping LaunchAgent" mac_launchctl bootstrap "$domain" "$agent_plist" || true
+            run_step 5 "Enabling LaunchAgent" mac_launchctl enable "$domain/$LABEL" || true
+            run_step 10 "Starting LaunchAgent" mac_launchctl kickstart -k "$domain/$LABEL" || true
             wait_for_port || {
-                run_step 5 "Cleaning up failed LaunchAgent" launchctl bootout "$domain/$LABEL" || true
+                run_step 5 "Cleaning up failed LaunchAgent" mac_launchctl bootout "$domain/$LABEL" || true
                 proxy_off
                 say "SpoofDPI did not start on 127.0.0.1:8080."
                 [ -f "$stderr_log" ] && tail -n 20 "$stderr_log"
@@ -464,9 +468,9 @@ pause_service() {
     require_root pause
     case "$(uname -s)" in
         Darwin)
-            run_step 5 "Booting out LaunchAgent" launchctl bootout "$(mac_domain)/$LABEL" || true
+            run_step 5 "Booting out LaunchAgent" mac_launchctl bootout "$(mac_domain)/$LABEL" || true
             run_step 5 "Booting out old LaunchDaemon" launchctl bootout "system/$LABEL" || true
-            run_step 5 "Disabling LaunchAgent" launchctl disable "$(mac_domain)/$LABEL" || true
+            run_step 5 "Disabling LaunchAgent" mac_launchctl disable "$(mac_domain)/$LABEL" || true
             ;;
         Linux) run_step 10 "Stopping systemd service" systemctl stop "$SERVICE" || true ;;
     esac
@@ -483,9 +487,9 @@ resume_service() {
                 say "Service is not installed. Run: sudo $0 install"
                 exit 1
             fi
-            run_step 10 "Bootstrapping LaunchAgent" launchctl bootstrap "$(mac_domain)" "$(mac_agent_plist)" || true
-            run_step 5 "Enabling LaunchAgent" launchctl enable "$(mac_domain)/$LABEL" || true
-            run_step 10 "Starting LaunchAgent" launchctl kickstart -k "$(mac_domain)/$LABEL" || true
+            run_step 10 "Bootstrapping LaunchAgent" mac_launchctl bootstrap "$(mac_domain)" "$(mac_agent_plist)" || true
+            run_step 5 "Enabling LaunchAgent" mac_launchctl enable "$(mac_domain)/$LABEL" || true
+            run_step 10 "Starting LaunchAgent" mac_launchctl kickstart -k "$(mac_domain)/$LABEL" || true
             wait_for_port || { proxy_off; say "SpoofDPI did not start."; exit 1; }
             proxy_on
             ;;
@@ -500,9 +504,9 @@ uninstall_service() {
     require_root uninstall
     case "$(uname -s)" in
         Darwin)
-            run_step 5 "Booting out LaunchAgent" launchctl bootout "$(mac_domain)/$LABEL" || true
+            run_step 5 "Booting out LaunchAgent" mac_launchctl bootout "$(mac_domain)/$LABEL" || true
             run_step 5 "Booting out old LaunchDaemon" launchctl bootout "system/$LABEL" || true
-            run_step 5 "Disabling LaunchAgent" launchctl disable "$(mac_domain)/$LABEL" || true
+            run_step 5 "Disabling LaunchAgent" mac_launchctl disable "$(mac_domain)/$LABEL" || true
             say "Removing plist files..."
             rm -f "$(mac_agent_plist)" "$PLIST"
             ;;
