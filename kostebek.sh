@@ -33,6 +33,36 @@ need_cmd() {
     }
 }
 
+run_quiet() {
+    local seconds="$1"
+    local label="$2"
+    shift 2
+
+    say "$label..."
+    "$@" >/dev/null 2>&1 &
+    local pid=$!
+    local elapsed=0
+
+    while kill -0 "$pid" 2>/dev/null; do
+        if [ "$elapsed" -ge "$seconds" ]; then
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            say "$label timed out; continuing."
+            return 1
+        fi
+
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+
+    if wait "$pid" 2>/dev/null; then
+        return 0
+    fi
+
+    say "$label skipped or already clean."
+    return 1
+}
+
 status() {
     case "$(uname -s)" in
         Darwin)
@@ -83,9 +113,9 @@ network_service() {
 }
 
 stop_spoofdpi_processes() {
-    pkill -x spoofdpi 2>/dev/null || true
-    pkill -f "/spoofdpi" 2>/dev/null || true
-    killall spoofdpi 2>/dev/null || true
+    run_quiet 3 "Stopping SpoofDPI processes" pkill -x spoofdpi || true
+    run_quiet 3 "Stopping SpoofDPI by path" pkill -f "/spoofdpi" || true
+    run_quiet 3 "Stopping SpoofDPI by name" killall spoofdpi || true
 }
 
 proxy_on() {
@@ -104,8 +134,8 @@ proxy_off() {
     local svc
     svc="$(network_service)"
     [ -n "$svc" ] || return 0
-    networksetup -setwebproxystate "$svc" off 2>/dev/null || true
-    networksetup -setsecurewebproxystate "$svc" off 2>/dev/null || true
+    run_quiet 5 "Disabling HTTP proxy on $svc" networksetup -setwebproxystate "$svc" off || true
+    run_quiet 5 "Disabling HTTPS proxy on $svc" networksetup -setsecurewebproxystate "$svc" off || true
 }
 
 wait_for_port() {
@@ -253,11 +283,11 @@ pause_service() {
     require_root pause
     case "$(uname -s)" in
         Darwin)
-            launchctl bootout "system/$LABEL" 2>/dev/null || true
-            launchctl bootout system "$PLIST" 2>/dev/null || true
-            launchctl disable "system/$LABEL" 2>/dev/null || true
+            run_quiet 5 "Booting out $LABEL" launchctl bootout "system/$LABEL" || true
+            run_quiet 5 "Booting out plist" launchctl bootout system "$PLIST" || true
+            run_quiet 5 "Disabling launchd service" launchctl disable "system/$LABEL" || true
             ;;
-        Linux) systemctl stop "$SERVICE" 2>/dev/null || true ;;
+        Linux) run_quiet 10 "Stopping systemd service" systemctl stop "$SERVICE" || true ;;
     esac
     stop_spoofdpi_processes
     proxy_off
@@ -289,19 +319,22 @@ uninstall_service() {
     require_root uninstall
     case "$(uname -s)" in
         Darwin)
-            launchctl bootout "system/$LABEL" 2>/dev/null || true
-            launchctl bootout system "$PLIST" 2>/dev/null || true
-            launchctl disable "system/$LABEL" 2>/dev/null || true
+            run_quiet 5 "Booting out $LABEL" launchctl bootout "system/$LABEL" || true
+            run_quiet 5 "Booting out plist" launchctl bootout system "$PLIST" || true
+            run_quiet 5 "Disabling launchd service" launchctl disable "system/$LABEL" || true
+            say "Removing plist..."
             rm -f "$PLIST"
             ;;
         Linux)
-            systemctl disable --now "$SERVICE" 2>/dev/null || true
+            run_quiet 10 "Disabling systemd service" systemctl disable --now "$SERVICE" || true
+            say "Removing systemd unit..."
             rm -f "/etc/systemd/system/$SERVICE"
-            systemctl daemon-reload
+            run_quiet 10 "Reloading systemd" systemctl daemon-reload || true
             ;;
     esac
     stop_spoofdpi_processes
     proxy_off
+    say "Removing SpoofDPI binary..."
     rm -f "$SPOOFDPI_SYSTEM"
     say "Service uninstalled."
 }
